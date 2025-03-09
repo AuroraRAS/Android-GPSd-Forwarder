@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="attitudeUpdate">
+        <item>No attitude</item>
+        <item>SENSOR_DELAY_FASTEST</item>
+        <item>SENSOR_DELAY_GAME</item>
+        <item>SENSOR_DELAY_UI</item>
+        <item>SENSOR_DELAY_NORMAL</item>
+    </string-array>
+</resources>

@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.SensorManager;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.IBinder;
@@ -18,6 +19,7 @@ import java.net.SocketException;
 public class GpsdForwarderService extends Service implements LoggingCallback, OnNmeaMessageListenerCompat {
     public static final String GPSD_SERVER_ADDRESS = "io.github.tiagoshibata.GPSD_SERVER_ADDRESS";
     public static final String GPSD_SERVER_PORT = "io.github.tiagoshibata.GPSD_SERVER_PORT";
+    public static final String GPSD_ATTITUDE_UPDATE = "io.github.tiagoshibata.GPSD_ATTITUDE_UPDATE";
     private static final String TAG = "GpsdClientService";
     private static final String NOTIFICATION_CHANNEL = "gpsd_streaming";
     private static final int NOTIFICATION_ID = 1;
@@ -37,7 +39,7 @@ public class GpsdForwarderService extends Service implements LoggingCallback, On
     public void onCreate() {
         super.onCreate();
         try {
-            nmeaMessageListener.start((LocationManager)getSystemService(Context.LOCATION_SERVICE), this, this);
+            nmeaMessageListener.start((LocationManager)getSystemService(Context.LOCATION_SERVICE), (SensorManager)getSystemService(Context.SENSOR_SERVICE), this, this);
         } catch (RuntimeException e) {
             log(e.getMessage());
         }
@@ -61,6 +63,7 @@ public class GpsdForwarderService extends Service implements LoggingCallback, On
         super.onStartCommand(intent, flags, startId);
         String serverAddress = intent.getStringExtra(GPSD_SERVER_ADDRESS);
         int serverPort = intent.getIntExtra(GPSD_SERVER_PORT, -1);
+        nmeaMessageListener.setAttitudeUpdate(intent.getIntExtra(GPSD_ATTITUDE_UPDATE, -1));
         if (serverAddress == null || serverPort <= 0)
             throw new RuntimeException(
                     "GpsdClientService requires parameters " + GPSD_SERVER_ADDRESS + " and " + GPSD_SERVER_PORT);

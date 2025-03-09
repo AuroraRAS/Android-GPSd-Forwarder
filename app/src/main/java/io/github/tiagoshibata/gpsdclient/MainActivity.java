@@ -9,7 +9,6 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -19,11 +18,14 @@ import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Spinner;
 import android.widget.TextView;
 
-import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_CODE_FINE_LOCATION = 0;
@@ -35,13 +37,19 @@ public class MainActivity extends Activity {
     private TextView serverAddressTextView;
     private TextView serverPortTextView;
     private Button startStopButton;
+    private Spinner spinner;
     private boolean connected;
+
+    // Use single-threaded Executor instead of AsyncTask
+    private ExecutorService executor = Executors.newSingleThreadExecutor();
+    private Future<?> gpsdServiceFuture;
+
     private ServiceConnection serviceConnection = new ServiceConnection() {
         private LoggingCallback logger = message -> runOnUiThread(() -> print(message));
 
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            GpsdForwarderService.Binder binder = (GpsdForwarderService.Binder)service;
+            GpsdForwarderService.Binder binder = (GpsdForwarderService.Binder) service;
             binder.setLoggingCallback(logger);
         }
 
@@ -52,7 +60,6 @@ public class MainActivity extends Activity {
             startStopButton.setEnabled(true);
         }
     };
-    private AsyncTask<String, Void, String> gpsdServiceTask;
 
     private void initializeUi() {
         setContentView(R.layout.activity_main);
@@ -61,13 +68,14 @@ public class MainActivity extends Activity {
         serverAddressTextView = findViewById(R.id.serverAddress);
         serverPortTextView = findViewById(R.id.serverPort);
         startStopButton = findViewById(R.id.startStopButton);
+        spinner = findViewById(R.id.attitudeUpdate);
 
         serverPortTextView.addTextChangedListener(new TextWatcher() {
             @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
 
             @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
 
             @Override
             public void afterTextChanged(Editable editable) {
@@ -107,7 +115,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         initializeUi();
 
-        LocationManager locationManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
+        LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
             print("GPS is not enabled! Go to Settings and enable a location mode with GPS");
             Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
@@ -120,6 +128,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         stopGpsdService();
+        executor.shutdownNow();
     }
 
     private boolean ensureLocationPermission() {
@@ -132,7 +141,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
-        if (requestCode == REQUEST_CODE_FINE_LOCATION && grantResults.length == 1 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == REQUEST_CODE_FINE_LOCATION && grantResults.length == 1 &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED)
             print("GPS access allowed");
         else {
             print("GPS permission denied");
@@ -149,8 +159,7 @@ public class MainActivity extends Activity {
                     .putString(SERVER_ADDRESS, serverAddress)
                     .putString(SERVER_PORT, serverPort)
                     .apply();
-            gpsdServiceTask = new StartGpsdServiceTask(this);
-            gpsdServiceTask.execute(serverAddress, serverPort);
+            startGpsdServiceTask(serverAddress, serverPort);
             startStopButton.setEnabled(false);
         } else {
             stopGpsdService();
@@ -158,66 +167,53 @@ public class MainActivity extends Activity {
         setServiceConnected(!connected);
     }
 
-    private static class StartGpsdServiceTask extends AsyncTask<String, Void, String> {
-        private WeakReference<MainActivity> activityRef;
-        private int port;
-
-        StartGpsdServiceTask(MainActivity activity) {
-            activityRef = new WeakReference<>(activity);
-        }
-
-        @Override
-        protected String doInBackground(String... host) {
-            port = Integer.parseInt(host[1]);
+    // Use ExecutorService to perform address resolution in the thread pool and start the service in the UI thread
+    private void startGpsdServiceTask(final String serverAddress, final String serverPort) {
+        gpsdServiceFuture = executor.submit(() -> {
+            int port = Integer.parseInt(serverPort);
+            String resolvedAddress;
             try {
-                return InetAddress.getByName(host[0]).getHostAddress();
+                resolvedAddress = InetAddress.getByName(serverAddress).getHostAddress();
             } catch (UnknownHostException e) {
-                cancel(false);
-                return "Can't resolve " + host[0];
-            }
-        }
-
-        @Override
-        protected void onCancelled(String result) {
-            MainActivity activity = activityRef.get();
-            if (activity == null)
+                final String errorMessage = "Can't resolve " + serverAddress;
+                runOnUiThread(() -> {
+                    print(errorMessage);
+                    setServiceConnected(false);
+                    startStopButton.setEnabled(true);
+                });
                 return;
-            activity.print(result != null ? result : "StartGpsdServiceTask was cancelled");
-            activity.setServiceConnected(false);
-            activity.startStopButton.setEnabled(true);
-        }
-
-        @Override
-        protected void onPostExecute(String address) {
-            MainActivity activity = activityRef.get();
-            if (activity == null)
-                return;
-            Intent intent = new Intent(activity, GpsdForwarderService.class);
-            intent.putExtra(GpsdForwarderService.GPSD_SERVER_ADDRESS, address)
-                    .putExtra(GpsdForwarderService.GPSD_SERVER_PORT, port);
-            activity.print("Streaming to " + address + ":" + port);
-            try {
-                if (!activity.bindService(intent, activity.serviceConnection, BIND_ABOVE_CLIENT | BIND_IMPORTANT)) {
-                    throw new RuntimeException("Failed to bind to service");
-                }
-                if (activity.startService(intent) == null) {
-                    activity.unbindService(activity.serviceConnection);
-                    throw new RuntimeException("Failed to start service");
-                }
-                activity.gpsdForwarderServiceIntent = intent;
-            } catch (RuntimeException e) {
-                activity.setServiceConnected(false);
-                activity.print(e.getMessage());
             }
-            activity.startStopButton.setEnabled(true);
-            activity.gpsdServiceTask = null;
-        }
+            final String finalAddress = resolvedAddress;
+
+            final int attitudeUpdate = spinner.getSelectedItemPosition() - 1;
+            runOnUiThread(() -> {
+                Intent intent = new Intent(MainActivity.this, GpsdForwarderService.class);
+                intent.putExtra(GpsdForwarderService.GPSD_SERVER_ADDRESS, finalAddress)
+                      .putExtra(GpsdForwarderService.GPSD_SERVER_PORT, port)
+                        .putExtra(GpsdForwarderService.GPSD_ATTITUDE_UPDATE, attitudeUpdate);
+                print("Streaming to " + finalAddress + ":" + port);
+                try {
+                    if (!bindService(intent, serviceConnection, BIND_ABOVE_CLIENT | BIND_IMPORTANT)) {
+                        throw new RuntimeException("Failed to bind to service");
+                    }
+                    if (startService(intent) == null) {
+                        unbindService(serviceConnection);
+                        throw new RuntimeException("Failed to start service");
+                    }
+                    gpsdForwarderServiceIntent = intent;
+                } catch (RuntimeException e) {
+                    setServiceConnected(false);
+                    print(e.getMessage());
+                }
+                startStopButton.setEnabled(true);
+            });
+        });
     }
 
     private void stopGpsdService() {
-        if (gpsdServiceTask != null) {
-            gpsdServiceTask.cancel(true);
-            gpsdServiceTask = null;
+        if (gpsdServiceFuture != null && !gpsdServiceFuture.isDone()) {
+            gpsdServiceFuture.cancel(true);
+            gpsdServiceFuture = null;
         }
         if (gpsdForwarderServiceIntent != null) {
             unbindService(serviceConnection);
@@ -231,6 +227,7 @@ public class MainActivity extends Activity {
         startStopButton.setText(connected ? R.string.stop : R.string.start);
         serverAddressTextView.setEnabled(!connected);
         serverPortTextView.setEnabled(!connected);
+        spinner.setEnabled(!connected);
     }
 
     private void print(String message) {

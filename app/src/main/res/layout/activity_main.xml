@@ -13,27 +13,35 @@
         android:textColor="#33b5e5"
         android:textSize="50sp"
         android:textStyle="bold" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_marginTop="64dp"
         android:orientation="vertical">
+
         <EditText
             android:id="@+id/serverAddress"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ems="10"
-            android:hint="@string/server_address_hint" />
+            android:hint="@string/server_address_hint"
+            android:importantForAutofill="no" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
+
             <EditText
                 android:id="@+id/serverPort"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:ems="10"
-                android:inputType="number"
-                android:hint="@string/server_port_hint" />
+                android:hint="@string/server_port_hint"
+                android:importantForAutofill="no"
+                android:inputType="number" />
+
             <Button
                 android:id="@+id/startStopButton"
                 android:layout_width="wrap_content"
@@ -42,6 +50,20 @@
                 android:onClick="startStopButtonOnClick"
                 android:text="@string/start" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/textView2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Attitude update" />
+
+        <Spinner
+            android:id="@+id/attitudeUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:entries="@array/attitudeUpdate"
+            android:spinnerMode="dropdown" />
+
         <TextView
             android:id="@+id/textView"
             android:layout_width="match_parent"
@@ -51,5 +73,6 @@
             android:scrollbars="vertical"
             android:textColor="@android:color/black"
             android:typeface="monospace" />
+
     </LinearLayout>
 </FrameLayout>
